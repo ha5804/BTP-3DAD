@@ -13,6 +13,7 @@ pretrained/
 *.pt
 *.ckpt
 *.bin
+data/real3dad/
 
 # Python caches
 __pycache__/
