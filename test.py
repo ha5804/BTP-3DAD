@@ -222,6 +222,7 @@ def evaluate_checkpoint(args, device, models, checkpoint_path, test_dataset, res
     text_normal_embed, text_anomaly_embed = encoder.encode_text_from_tokens(tokenized_prompts)
 
     class_names = test_dataset.PRESETS[args.dataset_name]
+    object_score_rows = []
     category_scores = defaultdict(list)
     category_labels = defaultdict(list)
     category_point_scores = defaultdict(list)
@@ -257,7 +258,16 @@ def evaluate_checkpoint(args, device, models, checkpoint_path, test_dataset, res
         sampled_points = points.squeeze(0).detach().cpu().numpy()
         sampled_scores = point_probs.detach().cpu().numpy().reshape(-1)
         sampled_labels = point_labels.detach().cpu().numpy().reshape(-1)
-        category_scores[category_idx].append(float(global_probs_combined.cpu().item()))
+        object_score = float(global_probs_combined.cpu().item())
+        category_scores[category_idx].append(object_score)
+        object_score_rows.append({
+            "checkpoint": str(Path(checkpoint_path).resolve()),
+            "dataset": args.dataset_name,
+            "class_name": class_names[category_idx],
+            "sample_path": str(sample["path"]),
+            "object_label": int(global_label),
+            "object_score": object_score,
+        })
         category_labels[category_idx].append(global_label)
         category_point_scores[category_idx].append(sampled_scores)
         category_point_labels[category_idx].append(sampled_labels)
@@ -272,6 +282,19 @@ def evaluate_checkpoint(args, device, models, checkpoint_path, test_dataset, res
 
         save_visual_npz(args, test_dataset, sample, points, point_probs, point_labels, category_idx)
         save_fullres_npz(args, test_dataset, sample, fullres, sampled_points, sampled_scores, sampled_labels, category_idx)
+
+    # Append one row per object, using exactly the scores/labels passed to AUROC.
+    # Checkpoint paths distinguish models when evaluating multiple checkpoints.
+    object_scores_csv = Path(args.output_dir) / "test_object_scores.csv"
+    write_header = not object_scores_csv.exists() or object_scores_csv.stat().st_size == 0
+    with object_scores_csv.open("a", newline="") as score_file:
+        writer = csv.DictWriter(score_file, fieldnames=[
+            "checkpoint", "dataset", "class_name", "sample_path", "object_label", "object_score",
+        ])
+        if write_header:
+            writer.writeheader()
+        writer.writerows(object_score_rows)
+    print(f"Object scores CSV: {object_scores_csv}")
 
     train_class_name = infer_train_class(args, checkpoint_path)
     object_auroc_list, object_ap_list, object_f1max_list = [], [], []
